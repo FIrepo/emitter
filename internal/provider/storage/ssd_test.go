@@ -14,7 +14,6 @@
 package storage
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io/ioutil"
@@ -116,9 +115,9 @@ func TestSSD_QuerySurveyed(t *testing.T) {
 
 		for _, tc := range tests {
 			if tc.gathered == nil {
-				s.cluster = nil
+				s.survey = nil
 			} else {
-				s.cluster = survey(func(string, []byte) (message.Awaiter, error) {
+				s.survey = survey(func(string, []byte) (message.Awaiter, error) {
 					return &mockAwaiter{f: func(_ time.Duration) [][]byte { return [][]byte{tc.gathered} }}, nil
 				})
 			}
@@ -325,21 +324,4 @@ func benchmarkQuery(b *testing.B, store *SSD, last int, m *stats.Metric) {
 	}()
 
 	time.Sleep(5 * time.Second)
-}
-
-func TestBackup(t *testing.T) {
-	runSSDTest(func(store *SSD) {
-		err := store.storeFrame(getNTestMessages(10))
-		assert.NoError(t, err)
-
-		// Do the backup
-		buffer := bytes.NewBuffer(nil)
-		err = store.Backup(buffer)
-		assert.NoError(t, err)
-
-		// Restore the backup
-		reader := bytes.NewReader(buffer.Bytes())
-		err = store.Restore(reader)
-		assert.NoError(t, err)
-	})
 }

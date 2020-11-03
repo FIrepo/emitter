@@ -16,17 +16,14 @@ package storage
 
 import (
 	"context"
-	enc "encoding/binary"
-	"io"
 	"os"
 	"time"
 
 	"github.com/dgraph-io/badger"
-	"github.com/dgraph-io/badger/protos"
-	"github.com/dgraph-io/badger/y"
 	"github.com/emitter-io/emitter/internal/async"
 	"github.com/emitter-io/emitter/internal/message"
 	"github.com/emitter-io/emitter/internal/provider/logging"
+	"github.com/emitter-io/emitter/internal/service"
 	"github.com/kelindar/binary"
 )
 
@@ -34,16 +31,16 @@ import (
 
 // SSD represents an SSD-optimized storage storage.
 type SSD struct {
-	retain  uint32             // The configured TTL for 'retained' messages.
-	cluster Surveyor           // The cluster surveyor.
-	db      *badger.DB         // The underlying database to use for messages.
-	cancel  context.CancelFunc // The cancellation function.
+	retain uint32             // The configured TTL for 'retained' messages.
+	survey service.Surveyor   // The cluster surveyor.
+	db     *badger.DB         // The underlying database to use for messages.
+	cancel context.CancelFunc // The cancellation function.
 }
 
 // NewSSD creates a new SSD-optimized storage storage.
-func NewSSD(cluster Surveyor) *SSD {
+func NewSSD(survey service.Surveyor) *SSD {
 	return &SSD{
-		cluster: cluster,
+		survey: survey,
 	}
 }
 
@@ -71,9 +68,7 @@ func (s *SSD) Configure(config map[string]interface{}) error {
 	}
 
 	// Create the options
-	opts := badger.DefaultOptions
-	opts.Dir = dir
-	opts.ValueDir = opts.Dir
+	opts := badger.DefaultOptions(dir)
 	opts.SyncWrites = false
 	opts.Truncate = true
 
@@ -137,8 +132,8 @@ func (s *SSD) Query(ssid message.Ssid, from, until time.Time, limit int) (messag
 	match := s.lookup(query)
 
 	// Issue the message survey to the cluster
-	if req, err := binary.Marshal(query); err == nil && s.cluster != nil {
-		if awaiter, err := s.cluster.Survey("ssdstore", req); err == nil {
+	if req, err := binary.Marshal(query); err == nil && s.survey != nil {
+		if awaiter, err := s.survey.Query("ssdstore", req); err == nil {
 
 			// Wait for all presence updates to come back (or a deadline)
 			for _, resp := range awaiter.Gather(2000 * time.Millisecond) {
@@ -228,62 +223,7 @@ func loadMessage(item *badger.Item) (message.Message, error) {
 	return message.DecodeMessage(data)
 }
 
-// Restore loads a previous snapshot
-func (s *SSD) Restore(reader io.Reader) error {
-	logging.LogAction("ssd", "reading from snapshot")
-	return s.db.Load(reader)
-}
-
 // GC runs the garbage collection on the storage
 func (s *SSD) GC() {
 	s.db.RunValueLogGC(0.50)
-}
-
-// Backup creates a snaphshot of the store.
-func (s *SSD) Backup(writer io.Writer) error {
-
-	// Run GC before backing up
-	s.GC()
-
-	// This is a copy of badger backup except it doesn't write any
-	// deleted or expired items in the snapshot.
-	logging.LogAction("ssd", "writing a snapshot")
-	return s.db.View(func(txn *badger.Txn) error {
-		it := txn.NewIterator(badger.DefaultIteratorOptions)
-		defer it.Close()
-
-		for it.Rewind(); it.Valid(); it.Next() {
-			item := it.Item()
-			valCopy, err := item.ValueCopy(nil)
-			if err != nil {
-				continue
-			}
-
-			entry := &protos.KVPair{
-				Key:       y.Copy(item.Key()),
-				Value:     valCopy,
-				UserMeta:  []byte{item.UserMeta()},
-				Version:   item.Version(),
-				ExpiresAt: item.ExpiresAt(),
-			}
-
-			// Write entries to disk
-			if err := writeTo(entry, writer); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
-func writeTo(entry *protos.KVPair, w io.Writer) error {
-	if err := enc.Write(w, binary.LittleEndian, uint64(entry.Size())); err != nil {
-		return err
-	}
-	buf, err := entry.Marshal()
-	if err != nil {
-		return err
-	}
-	_, err = w.Write(buf)
-	return err
 }

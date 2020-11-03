@@ -18,6 +18,7 @@ import (
 	"io/ioutil"
 	"testing"
 
+	"github.com/emitter-io/emitter/internal/errors"
 	"github.com/emitter-io/emitter/internal/message"
 	netmock "github.com/emitter-io/emitter/internal/network/mock"
 	"github.com/emitter-io/emitter/internal/security/license"
@@ -43,11 +44,11 @@ func TestNotifyError(t *testing.T) {
 	assert.NotNil(t, pipe)
 
 	go func() {
-		conn.notifyError(ErrUnauthorized, 1)
+		conn.notifyError(errors.ErrUnauthorized, 1)
 		conn.Close()
 	}()
 
 	b, err := ioutil.ReadAll(pipe.Server)
-	assert.Contains(t, string(b), ErrUnauthorized.Message)
+	assert.Contains(t, string(b), errors.ErrUnauthorized.Message)
 	assert.NoError(t, err)
 }

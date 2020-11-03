@@ -15,6 +15,8 @@
 package broker
 
 import (
+	"sync/atomic"
+
 	"github.com/emitter-io/address"
 	"github.com/emitter-io/stats"
 )
@@ -33,12 +35,11 @@ func newSampler(s *Service, m stats.Measurer) stats.Snapshotter {
 	}
 }
 
-
 // Snapshot creates the stats snapshot.
 func (s *sampler) Snapshot() (snapshot []byte) {
 	stat := s.service.measurer
 	serv := s.service
-	node := address.Fingerprint(serv.LocalName())
+	node := address.Fingerprint(serv.ID())
 	addr := serv.Config.Addr()
 
 	// Track runtime information
@@ -47,7 +48,7 @@ func (s *sampler) Snapshot() (snapshot []byte) {
 	// Track node specific information
 	stat.Measure("node.id", int32(node))
 	stat.Measure("node.peers", int32(serv.NumPeers()))
-	stat.Measure("node.conns", int32(serv.connections))
+	stat.Measure("node.conns", int32(atomic.LoadInt64(&serv.connections)))
 	stat.Measure("node.subs", int32(serv.subscriptions.Count()))
 
 	// Add node tags
@@ -60,4 +61,3 @@ func (s *sampler) Snapshot() (snapshot []byte) {
 	}
 	return
 }
-

@@ -22,6 +22,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 
 	conf "github.com/emitter-io/config"
 	"github.com/emitter-io/emitter/internal/config"
@@ -49,7 +50,7 @@ func BenchmarkSerial(b *testing.B) {
 
 	msg := mqtt.Publish{
 		Header:  mqtt.Header{QOS: 0},
-		Topic:   []byte("4kzJv3TMhYTg6lLk6fQoFG2KCe7gjFPk/a/b/c/"),
+		Topic:   []byte("w07Jv3TMhYTg6lLk6fQoVG2KCe7gjFPk/a/b/c/"),
 		Payload: []byte("hello world"),
 	}
 
@@ -76,7 +77,7 @@ func BenchmarkParallel(b *testing.B) {
 	defer cli.Close()
 	msg := mqtt.Publish{
 		Header:  mqtt.Header{QOS: 0},
-		Topic:   []byte("4kzJv3TMhYTg6lLk6fQoFG2KCe7gjFPk/a/b/c/"),
+		Topic:   []byte("w07Jv3TMhYTg6lLk6fQoVG2KCe7gjFPk/a/b/c/"),
 		Payload: []byte("hello world"),
 	}
 
@@ -112,7 +113,7 @@ func BenchmarkFanOut(b *testing.B) {
 			// Prepare a message for the benchmark
 			msg := mqtt.Publish{
 				Header:  mqtt.Header{QOS: 0},
-				Topic:   []byte("4kzJv3TMhYTg6lLk6fQoFG2KCe7gjFPk/a/b/c/"),
+				Topic:   []byte("w07Jv3TMhYTg6lLk6fQoVG2KCe7gjFPk/a/b/c/"),
 				Payload: []byte("hello world"),
 			}
 
@@ -156,7 +157,7 @@ func newBenchClient(port int) *testConn {
 	sub := mqtt.Subscribe{
 		Header: mqtt.Header{QOS: 0},
 		Subscriptions: []mqtt.TopicQOSTuple{
-			{Topic: []byte("4kzJv3TMhYTg6lLk6fQoFG2KCe7gjFPk/a/b/c/"), Qos: 0},
+			{Topic: []byte("w07Jv3TMhYTg6lLk6fQoVG2KCe7gjFPk/a/b/c/"), Qos: 0},
 		},
 	}
 	check(sub.EncodeTo(cli))
@@ -171,9 +172,13 @@ func newTestBroker(port int, licenseVersion int) *Service {
 		cfg.License = testLicenseV2
 	}
 
-	cfg.ListenAddr = fmt.Sprintf("127.0.0.1:%d", port)
-	cfg.Cluster = nil
 	cfg.TLS = &conf.TLSConfig{}
+	cfg.ListenAddr = fmt.Sprintf("127.0.0.1:%d", port)
+	cfg.Cluster = &config.ClusterConfig{
+		NodeName:      "00:00:00:00:00:01",
+		ListenAddr:    ":4000",
+		AdvertiseAddr: ":4001",
+	}
 
 	// Start the broker asynchronously
 	broker, err := NewService(context.Background(), cfg)
@@ -190,15 +195,22 @@ func newTestBroker(port int, licenseVersion int) *Service {
 }
 
 func newTestClient(port int) *testConn {
-	cli, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		panic(err)
+	var lastError error
+	for i := 1; i <= 10; i++ {
+		cli, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if lastError = err; lastError != nil {
+			time.Sleep(time.Second)
+			continue
+		}
+
+		return &testConn{
+			Conn:    cli,
+			buffer:  make([]byte, 8*1024),
+			scratch: make([]byte, 1),
+		}
 	}
-	return &testConn{
-		Conn:    cli,
-		buffer:  make([]byte, 8*1024),
-		scratch: make([]byte, 1),
-	}
+
+	panic(lastError)
 }
 
 type testConn struct {

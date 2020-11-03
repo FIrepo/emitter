@@ -11,6 +11,7 @@
         "appveyor.yml": true,
         "Dockerfile": true
     },
+    "editor.fontLigatures": true,
     "go.formatTool": "gofmt",
     "go.formatFlags": [
         "-s"
